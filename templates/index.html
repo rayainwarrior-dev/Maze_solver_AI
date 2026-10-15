@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive A* Maze Solver</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f6f8;
+            padding: 20px;
+            max-width: 900px;
+            margin: auto;
+        }
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .form-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        label { font-weight: bold; }
+        input[type="number"] {
+            width: 60px;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover { background-color: #0056b3; }
+        
+        .grid-container {
+            display: grid;
+            gap: 4px;
+            margin-top: 15px;
+            background-color: #bbb;
+            padding: 4px;
+            width: fit-content;
+            border-radius: 4px;
+        }
+        .cell {
+            width: 45px;
+            height: 45px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            user-select: none;
+            border-radius: 3px;
+            transition: background-color 0.1s ease;
+        }
+        .empty { background-color: #ffffff; color: #888; }
+        .wall { background-color: #333333; color: white; }
+        .start { background-color: #28a745; color: white; }
+        .goal { background-color: #dc3545; color: white; }
+        .path { background-color: #ffc107; color: black; }
+
+        .error { color: #dc3545; font-weight: bold; margin-bottom: 10px; }
+        .legend { margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <h2>A* Maze Solver (Interactive Grid)</h2>
+
+    {% if error %}
+        <div class="error">{{ error }}</div>
+    {% endif %}
+
+    <div class="controls">
+        <form id="mazeForm" method="POST">
+            <!-- Grid Size Inputs -->
+            <div class="form-group">
+                <label>Grid Dimensions:</label>
+                Rows: <input type="number" id="rows" name="rows" value="{{ rows }}" min="2" max="20">
+                Cols: <input type="number" id="cols" name="cols" value="{{ cols }}" min="2" max="20">
+                <button type="button" onclick="generateGrid()">Set Size</button>
+            </div>
+
+            <!-- Start / Goal Positions -->
+            <div class="form-group">
+                <label>Start (Row, Col):</label>
+                <input type="number" id="start_row" name="start_row" value="{{ start[0] }}" min="0">
+                <input type="number" id="start_col" name="start_col" value="{{ start[1] }}" min="0">
+
+                <label style="margin-left:15px;">Goal (Row, Col):</label>
+                <input type="number" id="goal_row" name="goal_row" value="{{ goal[0] }}" min="0">
+                <input type="number" id="goal_col" name="goal_col" value="{{ goal[1] }}" min="0">
+            </div>
+
+            <!-- Hidden field that passes matrix data to Flask -->
+            <input type="hidden" id="maze_data" name="maze_data">
+
+            <button type="submit" onclick="prepareSubmit()">Solve Maze</button>
+        </form>
+    </div>
+
+    <!-- Visual Interactive Grid -->
+    <div id="gridContainer" class="grid-container"></div>
+
+    
+
+    <script>
+        // Initial state passed from Flask
+        let currentRows = {{ rows }};
+        let currentCols = {{ cols }};
+        let mazeMatrix = {{ maze|tojson }};
+        let startPos = {{ start|tojson }};
+        let goalPos = {{ goal|tojson }};
+        let pathList = {{ path|tojson }};
+
+        function renderGrid() {
+            const container = document.getElementById("gridContainer");
+            container.innerHTML = "";
+            container.style.gridTemplateColumns = `repeat(${currentCols}, 45px)`;
+
+            for (let r = 0; r < currentRows; r++) {
+                for (let c = 0; c < currentCols; c++) {
+                    const cell = document.createElement("div");
+                    cell.className = "cell";
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+
+                    const isStart = (r === startPos[0] && c === startPos[1]);
+                    const isGoal = (r === goalPos[0] && c === goalPos[1]);
+                    const isPath = pathList.some(p => p[0] === r && p[1] === c);
+
+                    if (isStart) {
+                        cell.classList.add("start");
+                        cell.textContent = "S";
+                    } else if (isGoal) {
+                        cell.classList.add("goal");
+                        cell.textContent = "G";
+                    } else if (isPath) {
+                        cell.classList.add("path");
+                        cell.textContent = "*";
+                    } else if (mazeMatrix[r][c] === 1) {
+                        cell.classList.add("wall");
+                        cell.textContent = "1";
+                    } else {
+                        cell.classList.add("empty");
+                        cell.textContent = "0";
+                    }
+
+                    // Click event to toggle 0 <-> 1
+                    cell.addEventListener("click", () => toggleWall(r, c));
+                    container.appendChild(cell);
+                }
+            }
+        }
+
+        function toggleWall(r, c) {
+            // Prevent changing start/goal into walls
+            const isStart = (r == document.getElementById("start_row").value && c == document.getElementById("start_col").value);
+            const isGoal = (r == document.getElementById("goal_row").value && c == document.getElementById("goal_col").value);
+
+            if (isStart || isGoal) return;
+
+            // Toggle 0 and 1
+            mazeMatrix[r][c] = mazeMatrix[r][c] === 0 ? 1 : 0;
+            pathList = []; // Reset solved path on user edits
+            renderGrid();
+        }
+
+        function generateGrid() {
+            const rVal = parseInt(document.getElementById("rows").value);
+            const cVal = parseInt(document.getElementById("cols").value);
+
+            currentRows = rVal;
+            currentCols = cVal;
+
+            // Create new grid full of 0s
+            mazeMatrix = Array.from({ length: rVal }, () => Array(cVal).fill(0));
+            pathList = [];
+
+            // Set sensible default goal
+            document.getElementById("goal_row").value = rVal - 1;
+            document.getElementById("goal_col").value = cVal - 1;
+            goalPos = [rVal - 1, cVal - 1];
+
+            renderGrid();
+        }
+
+        function prepareSubmit() {
+            // Convert JS matrix to JSON string before sending to Flask
+            document.getElementById("maze_data").value = JSON.stringify(mazeMatrix);
+        }
+
+        // Initial render when page loads
+        renderGrid();
+    </script>
+</body>
+</html>
